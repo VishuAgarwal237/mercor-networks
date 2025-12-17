@@ -46,7 +46,7 @@ class ReferralNetwork:
     
     def direct_referrals(self, user: str) -> Iterable[str]:
         """Return the immediate candidates referred by user."""
-        return iter(self._children.get(user, set()))
+        return self._children.get(user, set())
     
     def all_referrals(self, user: str) -> Iterable[str]:
         """Return all direct and indirect referrals (descendants) of user."""
