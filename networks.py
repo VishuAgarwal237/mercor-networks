@@ -2,17 +2,13 @@
 Referral Network Challenge - Complete Implementation
 """
 
-from typing import Iterable, Optional, Callable  # type hints for function signatures
-from collections import defaultdict, deque  # defaultdict for graph, deque for BFS
+from typing import Iterable, Optional, Callable
+from collections import defaultdict, deque
 
 
-# =============================================================================
-# Part 1 — Graph
-# =============================================================================
-
-class ReferralError(ValueError):  # custom exception inheriting from ValueError
+class ReferralError(ValueError):
     """Raised when a referral operation would violate graph constraints."""
-    pass  # no additional functionality needed
+    pass
 
 
 class ReferralNetwork:
@@ -21,154 +17,135 @@ class ReferralNetwork:
     Invariants: no self-referrals, each candidate has at most one referrer, acyclic.
     """
     
-    def __init__(self):  # initialize empty graph
-        self._children: dict[str, set[str]] = defaultdict(set)  # referrer -> set of candidates they referred
-        self._parent: dict[str, str] = {}  # candidate -> their referrer (at most one)
+    def __init__(self):
+        self._children: dict[str, set[str]] = defaultdict(set)
+        self._parent: dict[str, str] = {}
     
-    def add_referral(self, referrer: str, candidate: str) -> None:  # add edge referrer -> candidate
+    def add_referral(self, referrer: str, candidate: str) -> None:
         """Add a referral edge. Raises ReferralError if it would violate constraints."""
+        if referrer == candidate:
+            raise ReferralError("Self-referral not allowed")
         
-        if referrer == candidate:  # check for self-referral
-            raise ReferralError("Self-referral not allowed")  # rule 1 violated
+        if candidate in self._parent:
+            raise ReferralError("Candidate already has a referrer")
         
-        if candidate in self._parent:  # check if candidate already has a referrer
-            raise ReferralError("Candidate already has a referrer")  # rule 2 violated
+        if self._would_create_cycle(referrer, candidate):
+            raise ReferralError("Would create a cycle")
         
-        if self._would_create_cycle(referrer, candidate):  # check for cycle
-            raise ReferralError("Would create a cycle")  # rule 3 violated
-        
-        # All checks passed, add the edge atomically
-        self._children[referrer].add(candidate)  # add candidate to referrer's children
-        self._parent[candidate] = referrer  # record referrer as candidate's parent
+        self._children[referrer].add(candidate)
+        self._parent[candidate] = referrer
     
-    def _would_create_cycle(self, referrer: str, candidate: str) -> bool:  # cycle detection
+    def _would_create_cycle(self, referrer: str, candidate: str) -> bool:
         """Check if adding edge referrer->candidate would create a cycle."""
-        # A cycle occurs if candidate is an ancestor of referrer
-        # i.e., if we can reach candidate by following parent pointers from referrer
-        current = referrer  # start from the referrer
-        while current in self._parent:  # walk up the ancestor chain
-            current = self._parent[current]  # move to parent
-            if current == candidate:  # found candidate in ancestor chain
-                return True  # cycle would be created
-        return False  # no cycle detected
+        current = referrer
+        while current in self._parent:
+            current = self._parent[current]
+            if current == candidate:
+                return True
+        return False
     
-    def direct_referrals(self, user: str) -> Iterable[str]:  # immediate children
+    def direct_referrals(self, user: str) -> Iterable[str]:
         """Return the immediate candidates referred by user."""
-        return iter(self._children.get(user, set()))  # return iterator over children set
+        return iter(self._children.get(user, set()))
     
-    def all_referrals(self, user: str) -> Iterable[str]:  # all descendants
+    def all_referrals(self, user: str) -> Iterable[str]:
         """Return all direct and indirect referrals (descendants) of user."""
-        result = []  # collect all descendants
-        queue = deque(self._children.get(user, set()))  # BFS queue starting with direct children
-        visited = set()  # track visited to avoid duplicates (shouldn't happen in DAG but safe)
+        result = []
+        queue = deque(self._children.get(user, set()))
+        visited = set()
         
-        while queue:  # BFS traversal
-            current = queue.popleft()  # get next node
-            if current not in visited:  # skip if already visited
-                visited.add(current)  # mark as visited
-                result.append(current)  # add to result
-                queue.extend(self._children.get(current, set()))  # add current's children to queue
+        while queue:
+            current = queue.popleft()
+            if current not in visited:
+                visited.add(current)
+                result.append(current)
+                queue.extend(self._children.get(current, set()))
         
-        return result  # return all descendants
+        return result
     
-    def get_all_users(self) -> set[str]:  # helper to get all nodes in graph
+    def get_all_users(self) -> set[str]:
         """Return all users in the network."""
-        users = set(self._children.keys())  # all referrers
-        users.update(self._parent.keys())  # all candidates (might not be referrers themselves)
-        return users  # combined set of all users
+        users = set(self._children.keys())
+        users.update(self._parent.keys())
+        return users
 
 
-# =============================================================================
-# Part 2 — Influence
-# =============================================================================
-
-def top_k_by_reach(network: ReferralNetwork, k: int) -> list[str]:  # rank by descendant count
+def top_k_by_reach(network: ReferralNetwork, k: int) -> list[str]:
     """Return top k users ranked by number of descendants (reach)."""
-    users = network.get_all_users()  # get all users in network
+    users = network.get_all_users()
     
-    reach_scores = []  # list of (user, reach_count) tuples
-    for user in users:  # compute reach for each user
-        descendants = list(network.all_referrals(user))  # get all descendants
-        reach_scores.append((user, len(descendants)))  # store user and count
+    reach_scores = []
+    for user in users:
+        descendants = list(network.all_referrals(user))
+        reach_scores.append((user, len(descendants)))
     
-    reach_scores.sort(key=lambda x: (-x[1], x[0]))  # sort by reach desc, then name asc for ties
+    reach_scores.sort(key=lambda x: (-x[1], x[0]))
     
-    return [user for user, _ in reach_scores[:k]]  # return top k users
+    return [user for user, _ in reach_scores[:k]]
 
 
-def top_k_by_flow_centrality(network: ReferralNetwork, k: int) -> list[str]:  # betweenness centrality variant
+def top_k_by_flow_centrality(network: ReferralNetwork, k: int) -> list[str]:
     """
     Return top k users ranked by flow centrality.
     Flow centrality(u): count of ordered pairs (s,t) where s≠u≠t and u lies on
     a shortest path from s to t. Endpoints don't count as on the path.
     """
-    users = list(network.get_all_users())  # get all users as list
-    n = len(users)  # number of users
+    users = list(network.get_all_users())
+    n = len(users)
     
-    if n == 0:  # empty network
-        return []  # no users to rank
+    if n == 0:
+        return []
     
-    # Build adjacency list for BFS
-    adj: dict[str, list[str]] = defaultdict(list)  # adjacency list representation
-    for user in users:  # for each user
-        for child in network.direct_referrals(user):  # for each direct referral
-            adj[user].append(child)  # add directed edge
+    adj: dict[str, list[str]] = defaultdict(list)
+    for user in users:
+        for child in network.direct_referrals(user):
+            adj[user].append(child)
     
-    centrality: dict[str, int] = defaultdict(int)  # flow centrality scores
+    centrality: dict[str, int] = defaultdict(int)
     
-    # For each source, find shortest paths to all reachable nodes
-    for s in users:  # iterate over all sources
-        # BFS to find shortest paths from s
-        dist: dict[str, int] = {s: 0}  # distance from s
-        parent_lists: dict[str, list[str]] = defaultdict(list)  # predecessors on shortest paths
-        queue = deque([s])  # BFS queue
+    for s in users:
+        dist: dict[str, int] = {s: 0}
+        parent_lists: dict[str, list[str]] = defaultdict(list)
+        queue = deque([s])
         
-        while queue:  # BFS traversal
-            u = queue.popleft()  # current node
-            for v in adj[u]:  # for each neighbor
-                if v not in dist:  # first time reaching v
-                    dist[v] = dist[u] + 1  # record distance
-                    parent_lists[v].append(u)  # u is a predecessor of v
-                    queue.append(v)  # add v to queue
-                elif dist[v] == dist[u] + 1:  # another shortest path to v
-                    parent_lists[v].append(u)  # add u as additional predecessor
+        while queue:
+            u = queue.popleft()
+            for v in adj[u]:
+                if v not in dist:
+                    dist[v] = dist[u] + 1
+                    parent_lists[v].append(u)
+                    queue.append(v)
+                elif dist[v] == dist[u] + 1:
+                    parent_lists[v].append(u)
         
-        # For each target t reachable from s, count intermediates on shortest paths
-        for t in dist:  # for each reachable target
-            if t == s:  # skip source itself
-                continue  # no path from s to s counts
+        for t in dist:
+            if t == s:
+                continue
             
-            # Backtrack from t to s, collecting all nodes on shortest paths
-            intermediates = set()  # nodes between s and t on shortest paths
-            visited_backtrack = set()  # avoid revisiting during backtrack
-            backtrack_queue = deque([t])  # start from target
+            intermediates = set()
+            visited_backtrack = set()
+            backtrack_queue = deque([t])
             
-            while backtrack_queue:  # backtrack BFS
-                node = backtrack_queue.popleft()  # current node
-                if node in visited_backtrack:  # already processed
-                    continue  # skip
-                visited_backtrack.add(node)  # mark as processed
+            while backtrack_queue:
+                node = backtrack_queue.popleft()
+                if node in visited_backtrack:
+                    continue
+                visited_backtrack.add(node)
                 
-                for pred in parent_lists[node]:  # for each predecessor
-                    if pred != s:  # don't count source as intermediate
-                        intermediates.add(pred)  # pred is on a shortest path
-                        backtrack_queue.append(pred)  # continue backtracking
+                for pred in parent_lists[node]:
+                    if pred != s:
+                        intermediates.add(pred)
+                        backtrack_queue.append(pred)
             
-            # Each intermediate on shortest path s->t gets +1
-            for u in intermediates:  # for each intermediate node
-                centrality[u] += 1  # increment flow centrality
+            for u in intermediates:
+                centrality[u] += 1
     
-    # Sort by centrality descending, then by name ascending for ties
-    sorted_users = sorted(users, key=lambda u: (-centrality[u], u))  # stable sort
+    sorted_users = sorted(users, key=lambda u: (-centrality[u], u))
     
-    return sorted_users[:k]  # return top k
+    return sorted_users[:k]
 
 
-# =============================================================================
-# Part 3 — Growth
-# =============================================================================
-
-def expected_network_size(p: float, days: int) -> float:  # expected growth model
+def expected_network_size(p: float, days: int) -> float:
     """
     Model expected network growth over discrete days.
     - Each referrer starts with capacity 10 successful referrals
@@ -178,179 +155,144 @@ def expected_network_size(p: float, days: int) -> float:  # expected growth mode
     - Day 0 starts with 100 active referrers
     Returns expected network size at end of given days.
     """
-    # Track expected count of referrers at each capacity level (1 to 10)
-    # capacity[c] = expected number of referrers with c remaining capacity
-    capacity = [0.0] * 11  # index 0 unused, indices 1-10 for capacity levels
-    capacity[10] = 100.0  # start with 100 referrers at capacity 10
+    capacity = [0.0] * 11
+    capacity[10] = 100.0
     
-    total_referrals = 0.0  # cumulative expected successful referrals
+    total_referrals = 0.0
     
-    for day in range(days + 1):  # simulate days 0 through 'days' inclusive
-        # Each referrer with capacity c has probability p of success
-        # Success: c decreases by 1, one new referral joins next day
-        # Failure: c stays the same
+    for day in range(days + 1):
+        new_capacity = [0.0] * 11
+        day_referrals = 0.0
         
-        new_capacity = [0.0] * 11  # capacity distribution for next day
-        day_referrals = 0.0  # expected referrals made this day
-        
-        for c in range(1, 11):  # for each capacity level
-            count = capacity[c]  # expected referrers at this capacity
-            if count == 0:  # no referrers at this level
-                continue  # skip
+        for c in range(1, 11):
+            count = capacity[c]
+            if count == 0:
+                continue
             
-            # Expected referrers who succeed (make a referral)
-            succeed = count * p  # expected successes
-            fail = count * (1 - p)  # expected failures
+            succeed = count * p
+            fail = count * (1 - p)
             
-            day_referrals += succeed  # add to day's referral count
+            day_referrals += succeed
             
-            if c > 1:  # if capacity > 1, successful referrers move to c-1
-                new_capacity[c - 1] += succeed  # capacity decreases
-            # if c == 1, successful referrers drop to 0 capacity (inactive)
+            if c > 1:
+                new_capacity[c - 1] += succeed
             
-            new_capacity[c] += fail  # failed referrers stay at same capacity
+            new_capacity[c] += fail
         
-        total_referrals += day_referrals  # accumulate total referrals
-        
-        # New referrals from this day join tomorrow with capacity 10
-        new_capacity[10] += day_referrals  # they join next day
-        
-        capacity = new_capacity  # update for next day
+        total_referrals += day_referrals
+        new_capacity[10] += day_referrals
+        capacity = new_capacity
     
-    return 100.0 + total_referrals  # initial 100 plus all successful referrals
+    return 100.0 + total_referrals
 
-
-# =============================================================================
-# Part 4 — Incentive
-# =============================================================================
 
 def min_bonus_for_target(
-    days: int,  # number of days to run
-    target_network_size: int,  # target size to reach
-    adoption_prob: Callable[[int], float]  # black-box function: bonus -> probability
-) -> Optional[int]:  # return smallest valid bonus or None
+    days: int,
+    target_network_size: int,
+    adoption_prob: Callable[[int], float]
+) -> Optional[int]:
     """
     Find minimum bonus (in $10 increments) to reach target network size.
     adoption_prob(bonus) returns participation probability for given bonus.
     Returns None if no bonus can reach the target.
     """
-    # Binary search for minimum bonus
-    # Since adoption_prob is monotonically non-decreasing,
-    # expected_network_size is also monotonically non-decreasing in bonus
+    max_p = adoption_prob(10000)
+    max_size = expected_network_size(max_p, days)
     
-    # First, find an upper bound where target is achievable
-    # Also check if target is achievable at all (even with p=1)
-    max_p = adoption_prob(10000)  # check at high bonus
-    max_size = expected_network_size(max_p, days)  # max achievable size
+    if max_size < target_network_size:
+        test_bonus = 10000
+        while test_bonus <= 1000000:
+            p = adoption_prob(test_bonus)
+            size = expected_network_size(p, days)
+            if size >= target_network_size:
+                break
+            test_bonus += 10000
+        else:
+            return None
     
-    if max_size < target_network_size:  # even max probability can't reach target
-        # Try even higher to confirm
-        test_bonus = 10000  # start high
-        while test_bonus <= 1000000:  # reasonable upper limit
-            p = adoption_prob(test_bonus)  # get probability
-            size = expected_network_size(p, days)  # compute expected size
-            if size >= target_network_size:  # found achievable bonus
-                break  # exit search for upper bound
-            test_bonus += 10000  # increase bonus
-        else:  # loop completed without finding
-            return None  # target not achievable
+    lo = 0
+    hi = 1000000
     
-    # Binary search between 0 and upper bound
-    lo = 0  # minimum bonus
-    hi = 1000000  # generous upper bound
+    p0 = adoption_prob(0)
+    if expected_network_size(p0, days) >= target_network_size:
+        return 0
     
-    # First check if bonus 0 already works
-    p0 = adoption_prob(0)  # probability at zero bonus
-    if expected_network_size(p0, days) >= target_network_size:  # target met at 0
-        return 0  # no bonus needed
+    result = None
     
-    result = None  # track best valid bonus found
-    
-    # Binary search for minimum bonus
-    while lo <= hi:  # standard binary search
-        mid = ((lo + hi) // 2 // 10) * 10  # round to nearest $10
-        if mid < lo:  # edge case at low values
-            mid = lo  # use lo instead
+    while lo <= hi:
+        mid = ((lo + hi) // 2 // 10) * 10
+        if mid < lo:
+            mid = lo
         
-        p = adoption_prob(mid)  # get probability at mid bonus
-        size = expected_network_size(p, days)  # compute expected size
+        p = adoption_prob(mid)
+        size = expected_network_size(p, days)
         
-        if size >= target_network_size:  # target met
-            result = mid  # record this bonus
-            hi = mid - 10  # search for smaller bonus
-        else:  # target not met
-            lo = mid + 10  # need higher bonus
+        if size >= target_network_size:
+            result = mid
+            hi = mid - 10
+        else:
+            lo = mid + 10
     
-    return result  # return minimum bonus found, or None
+    return result
 
 
-# =============================================================================
-# Testing
-# =============================================================================
-
-if __name__ == "__main__":  # only run when executed directly
+if __name__ == "__main__":
     
-    # Test Part 1 - Graph
-    print("=== Part 1: Graph Tests ===")  # header
-    net = ReferralNetwork()  # create network
+    print("=== Part 1: Graph Tests ===")
+    net = ReferralNetwork()
     
-    # Add some referrals
-    net.add_referral("Alice", "Bob")  # Alice referred Bob
-    net.add_referral("Alice", "Charlie")  # Alice referred Charlie
-    net.add_referral("Bob", "David")  # Bob referred David
-    net.add_referral("Charlie", "Eve")  # Charlie referred Eve
-    net.add_referral("David", "Frank")  # David referred Frank
+    net.add_referral("Alice", "Bob")
+    net.add_referral("Alice", "Charlie")
+    net.add_referral("Bob", "David")
+    net.add_referral("Charlie", "Eve")
+    net.add_referral("David", "Frank")
     
-    print(f"Direct referrals of Alice: {list(net.direct_referrals('Alice'))}")  # should be Bob, Charlie
-    print(f"All referrals of Alice: {list(net.all_referrals('Alice'))}")  # all descendants
+    print(f"Direct referrals of Alice: {list(net.direct_referrals('Alice'))}")
+    print(f"All referrals of Alice: {list(net.all_referrals('Alice'))}")
     
-    # Test constraints
-    try:  # test self-referral
-        net.add_referral("X", "X")  # should fail
-    except ReferralError as e:  # expected
-        print(f"Self-referral blocked: {e}")  # confirmed
+    try:
+        net.add_referral("X", "X")
+    except ReferralError as e:
+        print(f"Self-referral blocked: {e}")
     
-    try:  # test duplicate referrer
-        net.add_referral("Eve", "Bob")  # Bob already has referrer
-    except ReferralError as e:  # expected
-        print(f"Duplicate referrer blocked: {e}")  # confirmed
+    try:
+        net.add_referral("Eve", "Bob")
+    except ReferralError as e:
+        print(f"Duplicate referrer blocked: {e}")
     
-    try:  # test cycle
-        net.add_referral("Frank", "Alice")  # would create cycle
-    except ReferralError as e:  # expected
-        print(f"Cycle blocked: {e}")  # confirmed
+    try:
+        net.add_referral("Frank", "Alice")
+    except ReferralError as e:
+        print(f"Cycle blocked: {e}")
     
-    # Test Part 2 - Influence
-    print("\n=== Part 2: Influence Tests ===")  # header
-    print(f"Top 3 by reach: {top_k_by_reach(net, 3)}")  # users with most descendants
-    print(f"Top 3 by flow centrality: {top_k_by_flow_centrality(net, 3)}")  # users on most paths
+    print("\n=== Part 2: Influence Tests ===")
+    print(f"Top 3 by reach: {top_k_by_reach(net, 3)}")
+    print(f"Top 3 by flow centrality: {top_k_by_flow_centrality(net, 3)}")
     
-    # Test Part 3 - Growth
-    print("\n=== Part 3: Growth Tests ===")  # header
-    size = expected_network_size(0.1, 30)  # 10% daily probability, 30 days
-    print(f"Expected network size (p=0.1, days=30): {size:.2f}")  # print result
+    print("\n=== Part 3: Growth Tests ===")
+    size = expected_network_size(0.1, 30)
+    print(f"Expected network size (p=0.1, days=30): {size:.2f}")
     
-    size = expected_network_size(0.5, 30)  # 50% daily probability, 30 days
-    print(f"Expected network size (p=0.5, days=30): {size:.2f}")  # print result
+    size = expected_network_size(0.5, 30)
+    print(f"Expected network size (p=0.5, days=30): {size:.2f}")
     
-    # Test Part 4 - Incentive
-    print("\n=== Part 4: Incentive Tests ===")  # header
+    print("\n=== Part 4: Incentive Tests ===")
     
-    def sample_adoption(bonus: int) -> float:  # sample adoption probability function
+    def sample_adoption(bonus: int) -> float:
         """Sample adoption probability: increases with bonus."""
-        if bonus <= 0:  # no bonus
-            return 0.05  # 5% base participation
-        elif bonus <= 50:  # low bonus
-            return 0.05 + bonus * 0.005  # linear increase
-        elif bonus <= 200:  # medium bonus
-            return 0.30 + (bonus - 50) * 0.003  # slower increase
-        else:  # high bonus
-            return min(0.75 + (bonus - 200) * 0.001, 1.0)  # cap at 1.0
+        if bonus <= 0:
+            return 0.05
+        elif bonus <= 50:
+            return 0.05 + bonus * 0.005
+        elif bonus <= 200:
+            return 0.30 + (bonus - 50) * 0.003
+        else:
+            return min(0.75 + (bonus - 200) * 0.001, 1.0)
     
-    bonus = min_bonus_for_target(30, 200, sample_adoption)  # find min bonus for 200 users
-    print(f"Min bonus for 200 users in 30 days: ${bonus}")  # print result
+    bonus = min_bonus_for_target(30, 200, sample_adoption)
+    print(f"Min bonus for 200 users in 30 days: ${bonus}")
     
-    bonus = min_bonus_for_target(30, 500, sample_adoption)  # find min bonus for 500 users
-    print(f"Min bonus for 500 users in 30 days: ${bonus}")  # print result
+    bonus = min_bonus_for_target(30, 500, sample_adoption)
+    print(f"Min bonus for 500 users in 30 days: ${bonus}")
     
-    print("\n=== All tests completed ===")  # footer
+    print("\n=== All tests completed ===")
